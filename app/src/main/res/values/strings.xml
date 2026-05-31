@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">语音归档</string>
+    <string name="stop_recording">停止录音</string>
+</resources>
