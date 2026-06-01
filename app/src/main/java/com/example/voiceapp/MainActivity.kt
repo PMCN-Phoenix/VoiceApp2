@@ -21,12 +21,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     // 录音权限请求器
-    private val requestPermissionLauncher =
+    private val requestAudioPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (isGranted) {
-                startRecordingService()
+                // 录音权限已允许，继续请求通知权限（如果需要）
+                requestNotificationPermissionIfNeeded()
             } else {
                 Log.w(TAG, "录音权限被拒绝，无法启动录音服务")
+            }
+        }
+
+    // 通知权限请求器（Android 13+）
+    private val requestNotificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) {
+                // 通知权限已允许，所有必要权限齐，启动服务
+                startRecordingService()
+            } else {
+                Log.w(TAG, "通知权限被拒绝，前台服务通知可能无法显示")
+                // 即使没有通知权限，也启动服务（但通知不显示）
+                startRecordingService()
             }
         }
 
@@ -40,32 +54,53 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        // 检查并请求录音权限，然后启动服务
+        // 检查并请求权限，然后启动服务
         checkAndStartService()
     }
 
     private fun checkAndStartService() {
+        // 第一步：检查/请求录音权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             when {
                 ContextCompat.checkSelfPermission(
                     this, Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED -> {
-                    // 已有权限，直接启动
-                    startRecordingService()
+                    // 已有录音权限，继续请求通知权限
+                    requestNotificationPermissionIfNeeded()
                 }
                 shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) -> {
-                    // 用户之前拒绝过，可以在这里解释为什么需要录音权限
                     Log.d(TAG, "需要录音权限才能进行语音归档")
-                    // 仍然发起请求
-                    requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
                 else -> {
-                    // 首次请求
-                    requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    requestAudioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             }
         } else {
-            // API < 23，安装时已授权
+            // API < 23，权限已预授权
+            requestNotificationPermissionIfNeeded()
+        }
+    }
+
+    /**
+     * 如果运行在 Android 13+，请求通知权限
+     */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            when {
+                ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED -> {
+                    // 已有通知权限，直接启动服务
+                    startRecordingService()
+                }
+                else -> {
+                    // 请求通知权限
+                    requestNotificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+        } else {
+            // Android 12 及以下不需要动态请求通知权限
             startRecordingService()
         }
     }
