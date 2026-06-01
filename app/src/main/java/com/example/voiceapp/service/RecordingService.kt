@@ -17,7 +17,8 @@ import com.example.voiceapp.R
 import com.example.voiceapp.audio.AudioCaptureManager
 import com.example.voiceapp.audio.VoiceActivityDetector
 import com.example.voiceapp.network.WebSocketManager
-import com.example.voiceapp.voiceprint.VoiceprintManager          // 新增
+import com.example.voiceapp.voiceprint.VoiceprintManager
+import com.example.voiceapp.data.ConversationRepository
 
 class RecordingService : Service() {
 
@@ -35,15 +36,22 @@ class RecordingService : Service() {
     // 网络组件
     private lateinit var wsManager: WebSocketManager
 
-    // 声纹组件（新增）
+    // 声纹组件
     private lateinit var voiceprintManager: VoiceprintManager
 
-    // 当前语音段识别出的说话人 ID（新增）
+    // 当前语音段识别出的说话人 ID
     private var currentSpeakerId: String? = null
+
+    // 数据库仓库
+    private lateinit var repository: ConversationRepository
+    // 当前对话 ID
+    private var conversationId: String? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        repository = ConversationRepository()
+        conversationId = repository.ensureActiveConversation()
         initAudioComponents()
         initWebSocket()
     }
@@ -64,12 +72,12 @@ class RecordingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ---------- 音频组件初始化（修改）----------
+    // ---------- 音频组件初始化 ----------
     private fun initAudioComponents() {
         audioCapture = AudioCaptureManager()
         vad = VoiceActivityDetector()
 
-        // 新增：初始化声纹管理器并预注册测试说话人
+        // 初始化声纹管理器并预注册测试说话人
         voiceprintManager = VoiceprintManager()
         voiceprintManager.registerVoiceprint("person_alice")
         voiceprintManager.registerVoiceprint("person_bob")
@@ -83,7 +91,7 @@ class RecordingService : Service() {
             Log.d(TAG, "语音结束，段长度: ${pcmSegment.size} 字节")
             wsManager.sendEnd()
 
-            // 新增：声纹识别
+            // 声纹识别
             val speakerId = voiceprintManager.identifySpeaker(pcmSegment)
             if (speakerId != null) {
                 currentSpeakerId = speakerId
@@ -111,7 +119,7 @@ class RecordingService : Service() {
 
     // ---------- WebSocket 初始化 ----------
     private fun initWebSocket() {
-        // 根据实际环境选择地址（保留你当前的配置）
+        // 根据实际环境选择地址
         // wsManager = WebSocketManager(serverUrl = "ws://10.0.2.2:8080")
         // wsManager = WebSocketManager(serverUrl = "ws://localhost:8080")
         wsManager = WebSocketManager(serverUrl = "ws://10.213.205.71:8080")
@@ -121,10 +129,23 @@ class RecordingService : Service() {
         }
 
         wsManager.onTranscription = { text, isFinal ->
-            // 修改：关联说话人信息
             val speaker = currentSpeakerId ?: "unknown"
             Log.d(TAG, "转写结果: $text (final=$isFinal, speaker=$speaker)")
-            // TODO: 后续任务包将把 text、isFinal、speaker 存入数据库
+
+            // 存储到数据库
+            if (isFinal && text.isNotBlank()) {
+                if (speaker.startsWith("temp_")) {
+                    repository.ensureTemporarySpeaker(speaker)
+                }
+                conversationId?.let { cid ->
+                    repository.insertMessage(
+                        conversationId = cid,
+                        speakerId = speaker,
+                        content = text,
+                        confidence = 0.95
+                    )
+                }
+            }
         }
 
         wsManager.onError = { error ->
@@ -153,6 +174,8 @@ class RecordingService : Service() {
     private fun stopRecording() {
         audioCapture.stop()
         wsManager.disconnect()
+        conversationId?.let { repository.finishConversation(it) }
+        repository.debugPrintAllMessages()   // 新增：打印数据库内容进行调试
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "录音服务已停止")
