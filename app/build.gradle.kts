@@ -2,7 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)       // 新增：Compose 编译器插件
-    id("kotlin-kapt")                        // 新增：注解处理器（未来 Room 等预留）
+    //id("kotlin-kapt")                        // 新增：注解处理器（未来 Room 等预留）
 }
 
 android {
@@ -69,7 +69,9 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
-    implementation(libs.androidx.material3)              // 保留 Material3
+    implementation(libs.androidx.material3) // 保留 Material3
+    // 重新添加 View 体系的 Material3 库（提供 Theme.Material3.* 主题）
+    implementation(libs.material)
 
     // 原有的 appcompat、material、constraintlayout 已移除，改用 Compose
 
@@ -83,7 +85,7 @@ dependencies {
     // ========== 加密数据库 (SQLCipher) ==========
     //implementation("net.zetetic:android-database-sqlcipher:4.6.0")
     // 原版本 4.6.0 不存在，改为 4.5.4（已验证存在）
-    implementation("net.zetetic:android-database-sqlcipher:4.5.4")
+    implementation("net.zetetic:android-database-sqlcipher:4.5.3")
     implementation("androidx.sqlite:sqlite-ktx:2.4.0")
 
     // ========== 音频编解码 (Opus) ==========

@@ -16,6 +16,7 @@ import com.example.voiceapp.MainActivity
 import com.example.voiceapp.R
 import com.example.voiceapp.audio.AudioCaptureManager
 import com.example.voiceapp.audio.VoiceActivityDetector
+import com.example.voiceapp.network.WebSocketManager
 
 class RecordingService : Service() {
 
@@ -26,49 +27,57 @@ class RecordingService : Service() {
         private const val TAG = "RecordingService"
     }
 
-    // ---------- 新增：音频组件 ----------
+    // 音频组件
     private lateinit var audioCapture: AudioCaptureManager
     private lateinit var vad: VoiceActivityDetector
+
+    // 网络组件（新增）
+    private lateinit var wsManager: WebSocketManager
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        initAudioComponents()  // 新增：初始化音频采集和 VAD
+        initAudioComponents()
+        initWebSocket()  // 新增：初始化 WebSocket 并连接
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopRecording()      // 改为调用停止录音方法
+                stopRecording()
                 return START_NOT_STICKY
             }
         }
 
         val notification = buildNotification()
         startForeground(NOTIFICATION_ID, notification)
-        startRecording()            // 新增：启动录音
+        startRecording()
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // ---------- 新增：音频组件初始化 ----------
+    // ---------- 音频组件初始化（修改）----------
     private fun initAudioComponents() {
         audioCapture = AudioCaptureManager()
         vad = VoiceActivityDetector()
 
-        // VAD 回调
         vad.onSpeechStart = {
             Log.d(TAG, "语音开始")
-        }
-        vad.onSpeechEnd = { pcmSegment ->
-            Log.d(TAG, "语音结束，段长度: ${pcmSegment.size} 字节")
-            // TODO: 后续任务包将把 pcmSegment 发送给云端 ASR
+            wsManager.sendStart()  // 新增：通知 ASR 新语音段开始
         }
 
-        // 音频帧回调 → 送给 VAD 处理
+        vad.onSpeechEnd = { pcmSegment ->
+            Log.d(TAG, "语音结束，段长度: ${pcmSegment.size} 字节")
+            wsManager.sendEnd()    // 新增：通知 ASR 语音段结束
+        }
+
         audioCapture.onAudioFrame = { frame ->
             vad.processFrame(frame)
+            // 新增：如果正在语音中，实时发送音频帧
+            if (vad.isSpeaking()) {
+                wsManager.sendAudioFrame(frame)
+            }
         }
 
         audioCapture.onError = { error ->
@@ -76,13 +85,39 @@ class RecordingService : Service() {
         }
     }
 
-    // ---------- 新增：启动/停止录音方法 ----------
+    // ---------- WebSocket 初始化（新增）----------
+    private fun initWebSocket() {
+        //wsManager = WebSocketManager()  // 可传入自定义 URL 或 Token
+        //wsManager = WebSocketManager(serverUrl = "ws://10.0.2.2:8080")
+        //wsManager = WebSocketManager(serverUrl = "ws://localhost:8080")
+        wsManager = WebSocketManager(serverUrl = "ws://10.213.205.71:8080")
+
+        wsManager.onConnected = {
+            Log.d(TAG, "ASR 服务已连接")
+        }
+
+        wsManager.onTranscription = { text, isFinal ->
+            Log.d(TAG, "转写结果: $text (final=$isFinal)")
+            // TODO: 后续任务包将把转写结果存入数据库并显示
+        }
+
+        wsManager.onError = { error ->
+            Log.e(TAG, "WebSocket 错误: $error")
+        }
+
+        wsManager.onDisconnected = { reason ->
+            Log.w(TAG, "WebSocket 断开: $reason")
+        }
+
+        wsManager.connect()
+    }
+
+    // ---------- 启动/停止录音方法 ----------
     private fun startRecording() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
         ) {
             Log.e(TAG, "没有录音权限，无法开始录音")
-            // 实际项目中应在 MainActivity 引导用户授权
             return
         }
         audioCapture.start()
@@ -91,12 +126,13 @@ class RecordingService : Service() {
 
     private fun stopRecording() {
         audioCapture.stop()
+        wsManager.disconnect()  // 新增：断开 WebSocket 连接
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "录音服务已停止")
     }
 
-    // ---------- 通知相关（保持不变） ----------
+    // ---------- 通知相关（保持不变）----------
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,

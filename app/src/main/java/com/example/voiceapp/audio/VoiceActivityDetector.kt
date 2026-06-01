@@ -19,6 +19,9 @@ class VoiceActivityDetector(
     var onSpeechStart: (() -> Unit)? = null
     var onSpeechEnd: ((ByteArray) -> Unit)? = null
 
+    /**
+     * 处理一帧 PCM 数据
+     */
     fun processFrame(frame: ByteArray) {
         val energy = calculateEnergy(frame)
 
@@ -42,6 +45,15 @@ class VoiceActivityDetector(
         }
     }
 
+    /**
+     * 返回当前是否处于语音段中（有人在说话）。
+     * 供外部（如 RecordingService）判断是否需要发送音频帧给 ASR。
+     */
+    fun isSpeaking(): Boolean = isSpeech
+
+    /**
+     * 计算短时能量（RMS 的平方）
+     */
     private fun calculateEnergy(frame: ByteArray): Double {
         var sum = 0.0
         for (i in 0 until frame.size - 1 step 2) {
@@ -51,6 +63,9 @@ class VoiceActivityDetector(
         return sum / (frame.size / 2)
     }
 
+    /**
+     * 合并多个 ByteArray 为一个完整语音段
+     */
     private fun mergeByteArrays(arrays: List<ByteArray>): ByteArray {
         val totalSize = arrays.sumOf { it.size }
         val result = ByteArray(totalSize)
