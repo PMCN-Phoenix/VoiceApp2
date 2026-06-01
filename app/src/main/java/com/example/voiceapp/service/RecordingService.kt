@@ -12,13 +12,14 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.example.voiceapp.BuildConfig
 import com.example.voiceapp.MainActivity
 import com.example.voiceapp.R
 import com.example.voiceapp.audio.AudioCaptureManager
 import com.example.voiceapp.audio.VoiceActivityDetector
-import com.example.voiceapp.network.WebSocketManager
-import com.example.voiceapp.voiceprint.VoiceprintManager
 import com.example.voiceapp.data.ConversationRepository
+import com.example.voiceapp.network.BaiduWebSocketManager
+import com.example.voiceapp.voiceprint.VoiceprintManager
 
 class RecordingService : Service() {
 
@@ -33,8 +34,8 @@ class RecordingService : Service() {
     private lateinit var audioCapture: AudioCaptureManager
     private lateinit var vad: VoiceActivityDetector
 
-    // 网络组件
-    private lateinit var wsManager: WebSocketManager
+    // 网络组件（百度 WebSocket 管理器）
+    private lateinit var wsManager: BaiduWebSocketManager
 
     // 声纹组件
     private lateinit var voiceprintManager: VoiceprintManager
@@ -117,15 +118,18 @@ class RecordingService : Service() {
         }
     }
 
-    // ---------- WebSocket 初始化 ----------
+    // ---------- WebSocket 初始化（直接使用 API Key）----------
     private fun initWebSocket() {
-        // 根据实际环境选择地址
-        // wsManager = WebSocketManager(serverUrl = "ws://10.0.2.2:8080")
-        // wsManager = WebSocketManager(serverUrl = "ws://localhost:8080")
-        wsManager = WebSocketManager(serverUrl = "ws://10.213.205.71:8080")
+        // 从 BuildConfig 读取百度语音识别凭证
+        val appId = BuildConfig.BAIDU_APP_ID
+        val apiKey = BuildConfig.BAIDU_API_KEY
 
+        // 直接创建百度 WebSocket 管理器（不再需要 access_token）
+        wsManager = BaiduWebSocketManager(appId = appId, apiKey = apiKey)
+
+        // 设置回调
         wsManager.onConnected = {
-            Log.d(TAG, "ASR 服务已连接")
+            Log.d(TAG, "百度 ASR 已连接")
         }
 
         wsManager.onTranscription = { text, isFinal ->
@@ -149,13 +153,10 @@ class RecordingService : Service() {
         }
 
         wsManager.onError = { error ->
-            Log.e(TAG, "WebSocket 错误: $error")
+            Log.e(TAG, "百度 WebSocket 错误: $error")
         }
 
-        wsManager.onDisconnected = { reason ->
-            Log.w(TAG, "WebSocket 断开: $reason")
-        }
-
+        // 连接百度 ASR 服务
         wsManager.connect()
     }
 
@@ -175,7 +176,7 @@ class RecordingService : Service() {
         audioCapture.stop()
         wsManager.disconnect()
         conversationId?.let { repository.finishConversation(it) }
-        repository.debugPrintAllMessages()   // 新增：打印数据库内容进行调试
+        repository.debugPrintAllMessages()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         Log.d(TAG, "录音服务已停止")

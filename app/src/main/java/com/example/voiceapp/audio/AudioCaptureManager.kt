@@ -10,16 +10,15 @@ import java.io.ByteArrayOutputStream
 /**
  * 音频采集管理器：使用 AudioRecord 从麦克风实时读取 PCM 数据。
  * 通过回调输出音频帧和错误信息。
+ *
+ * 帧大小默认 5120 字节（16kHz, 16bit, 单声道下对应 160ms），
+ * 符合百度实时语音识别最佳实践。
  */
 class AudioCaptureManager(
     private val sampleRate: Int = 16000,      // 采样率 16kHz（ASR 标准）
     private val channelConfig: Int = AudioFormat.CHANNEL_IN_MONO,
     private val audioFormat: Int = AudioFormat.ENCODING_PCM_16BIT,
-    private val bufferSizeInBytes: Int = AudioRecord.getMinBufferSize(
-        16000,
-        AudioFormat.CHANNEL_IN_MONO,
-        AudioFormat.ENCODING_PCM_16BIT
-    ) * 2  // 双倍缓冲避免溢出
+    private val bufferSizeInBytes: Int = 5120  // 160ms = 5120 bytes
 ) {
     companion object {
         private const val TAG = "AudioCapture"
