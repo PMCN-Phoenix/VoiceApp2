@@ -50,10 +50,14 @@ class AppDatabase private constructor(context: Context) :
         }
     }
 
+    // ========== 改动 1：添加成员变量保存密码 ==========
+    private val passphrase: String
+
     init {
         SQLiteDatabase.loadLibs(context)
-        val passphrase = getOrCreatePassphrase(context)
-        writableDatabase.rawExecSQL("PRAGMA key = '$passphrase';")
+        passphrase = getOrCreatePassphrase(context)          // 生成并保存密码
+        // 改动 2：传入密码打开数据库并设置加密
+        getWritableDatabase(passphrase).rawExecSQL("PRAGMA key = '$passphrase';")
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -126,7 +130,6 @@ class AppDatabase private constructor(context: Context) :
             );
         """.trimIndent())
 
-        // FTS5 虚拟表，全文检索消息内容
         db.execSQL("""
             CREATE VIRTUAL TABLE message_fts USING fts5(
                 content,
@@ -135,21 +138,18 @@ class AppDatabase private constructor(context: Context) :
             );
         """.trimIndent())
 
-        // 触发器：插入时同步 FTS 索引
         db.execSQL("""
             CREATE TRIGGER message_ai AFTER INSERT ON message BEGIN
                 INSERT INTO message_fts(rowid, content) VALUES (new.rowid, new.content);
             END;
         """.trimIndent())
 
-        // 触发器：删除时同步 FTS 索引
         db.execSQL("""
             CREATE TRIGGER message_ad AFTER DELETE ON message BEGIN
                 INSERT INTO message_fts(message_fts, rowid, content) VALUES('delete', old.rowid, old.content);
             END;
         """.trimIndent())
 
-        // 触发器：更新时同步 FTS 索引
         db.execSQL("""
             CREATE TRIGGER message_au AFTER UPDATE ON message BEGIN
                 INSERT INTO message_fts(message_fts, rowid, content) VALUES('delete', old.rowid, old.content);
@@ -157,14 +157,12 @@ class AppDatabase private constructor(context: Context) :
             END;
         """.trimIndent())
 
-        // 性能索引
         db.execSQL("CREATE INDEX idx_message_conv ON message(conversation_id, timestamp);")
         db.execSQL("CREATE INDEX idx_message_sender ON message(sender_person_id);")
         db.execSQL("CREATE INDEX idx_voiceprint_person ON voiceprint(person_id);")
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        // 原型阶段，直接重建
         db.execSQL("DROP TABLE IF EXISTS message_fts;")
         db.execSQL("DROP TABLE IF EXISTS message;")
         db.execSQL("DROP TABLE IF EXISTS conversation_participant;")
@@ -175,6 +173,7 @@ class AppDatabase private constructor(context: Context) :
         onCreate(db)
     }
 
-    fun getReadableDb(): SQLiteDatabase = readableDatabase
-    fun getWritableDb(): SQLiteDatabase = writableDatabase
+    // 改动 3：使用保存的密码获取数据库实例
+    fun getReadableDb(): SQLiteDatabase = getReadableDatabase(passphrase)
+    fun getWritableDb(): SQLiteDatabase = getWritableDatabase(passphrase)
 }
