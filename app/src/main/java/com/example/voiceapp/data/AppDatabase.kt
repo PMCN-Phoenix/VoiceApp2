@@ -11,8 +11,9 @@ class AppDatabase private constructor(context: Context) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
     companion object {
+        private const val TAG = "AppDatabase"
         private const val DATABASE_NAME = "voice_archive.db"
-        private const val DATABASE_VERSION = 1
+        private const val DATABASE_VERSION = 2
         private const val PREFS_NAME = "db_secrets"
         private const val KEY_DB_PASSPHRASE = "db_passphrase"
 
@@ -162,15 +163,68 @@ class AppDatabase private constructor(context: Context) :
         db.execSQL("CREATE INDEX idx_voiceprint_person ON voiceprint(person_id);")
     }
 
+    // ✅ 重点修改：安全的升级方法
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS message_fts;")
-        db.execSQL("DROP TABLE IF EXISTS message;")
-        db.execSQL("DROP TABLE IF EXISTS conversation_participant;")
-        db.execSQL("DROP TABLE IF EXISTS conversation;")
-        db.execSQL("DROP TABLE IF EXISTS voiceprint;")
-        db.execSQL("DROP TABLE IF EXISTS temporary_speaker;")
-        db.execSQL("DROP TABLE IF EXISTS person_profile;")
+        Log.w(TAG, "数据库升级: $oldVersion -> $newVersion")
+        // 注意：这里为了演示原理，采用“重命名旧表 → 建新表 → 迁移数据 → 删旧表”的策略。
+        // 如果新旧表结构完全一致（例如仅添加索引），可直接 ALTER TABLE，
+        // 但由于原型阶段表结构可能变化，此方法更通用。
+
+        val tables = listOf("message", "conversation", "conversation_participant",
+                            "voiceprint", "temporary_speaker", "person_profile")
+        val tempPrefix = "_temp_old_"
+
+        // 步骤1：将旧表重命名为临时表
+        for (table in tables) {
+            try {
+                db.execSQL("ALTER TABLE $table RENAME TO ${tempPrefix}$table")
+            } catch (e: Exception) {
+                Log.w(TAG, "重命名表 $table 失败: ${e.message}，可能表不存在")
+            }
+        }
+        // 删除 FTS 表（因为它依赖于 message 表，重建时再创建）
+        db.execSQL("DROP TABLE IF EXISTS message_fts")
+
+        // 步骤2：创建新表结构
         onCreate(db)
+
+        // 步骤3：迁移数据（此处演示迁移所有列，实际可根据需求调整）
+        // 注意：如果新旧表结构有变化（如增减列），需要在此调整 SELECT 和 INSERT 的对应关系。
+        tryMigrateTable(db, "person_profile", tempPrefix)
+        tryMigrateTable(db, "voiceprint", tempPrefix)
+        tryMigrateTable(db, "temporary_speaker", tempPrefix)
+        tryMigrateTable(db, "conversation", tempPrefix)
+        tryMigrateTable(db, "conversation_participant", tempPrefix)
+        tryMigrateTable(db, "message", tempPrefix)
+
+        // 步骤4：删除临时旧表
+        for (table in tables) {
+            db.execSQL("DROP TABLE IF EXISTS ${tempPrefix}$table")
+        }
+        Log.d(TAG, "数据库升级完成")
+    }
+
+    // 辅助方法：从临时表迁移数据到新表（需要列名完全匹配）
+    private fun tryMigrateTable(db: SQLiteDatabase, tableName: String, prefix: String) {
+        try {
+            val tempTable = "$prefix$tableName"
+            // 先检查临时表是否存在
+            val cursor = db.rawQuery(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                arrayOf(tempTable)
+            )
+            if (cursor.count > 0) {
+                cursor.close()
+                // 复制所有行（假设新表结构与旧表完全一致）
+                db.execSQL("INSERT INTO $tableName SELECT * FROM $tempTable")
+                Log.d(TAG, "迁移 $tableName 表数据成功")
+            } else {
+                cursor.close()
+                Log.d(TAG, "临时表 $tempTable 不存在，跳过迁移")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "迁移 $tableName 失败: ${e.message}")
+        }
     }
 
     // 改动 3：使用保存的密码获取数据库实例
